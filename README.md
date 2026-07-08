@@ -34,6 +34,55 @@ PORT=9000 ./run.sh  # 다른 포트로 실행
 2. 결과 목록에서 원하는 영상의 **MP3 다운로드** 클릭
 3. 서버가 음원을 추출·변환한 뒤 `영상제목.mp3` 로 저장됨
 
+## Termux(안드로이드)에서 실행
+
+```bash
+# 1. 필수 패키지 설치
+pkg update && pkg upgrade
+pkg install python ffmpeg git tmux
+
+# 2. 코드 받기
+git clone https://github.com/yuchoi-bb/uptube.git
+cd uptube
+pip install -r requirements.txt
+
+# 3. 서버 시작 (tmux 세션으로 백그라운드 실행)
+./run.sh
+```
+
+폰이 잠들면 서버가 멈출 수 있으니 백그라운드 유지 설정을 권장합니다:
+
+```bash
+termux-wake-lock   # CPU 슬립 방지
+```
+
+안드로이드 설정 → 배터리 → Termux → **배터리 사용량 최적화 제외**도 함께 설정하세요.
+
+### 웹 접근 방법
+
+| 접속 위치 | 주소 |
+|---|---|
+| Termux를 실행 중인 폰 브라우저 | `http://localhost:8000` |
+| 같은 Wi-Fi의 다른 기기(PC 등) | `http://<폰 IP>:8000` |
+
+폰 IP 확인 (Termux에서):
+
+```bash
+ip -4 addr show wlan0 | grep inet
+```
+
+예: `inet 192.168.0.23/24` 로 나오면 PC 브라우저에서 `http://192.168.0.23:8000` 접속.
+
+서버 관리:
+
+```bash
+./run.sh status   # 상태 확인
+./run.sh logs     # 로그 보기
+./run.sh restart  # 재시작
+./run.sh stop     # 중지
+tmux attach -t uptube   # 세션 직접 접속 (빠져나오기: Ctrl+b 후 d)
+```
+
 ## 구조
 
 - `app.py` — Flask 서버. `/api/search` (검색/링크 조회), `/api/download/<id>` (mp3 추출)
