@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UpTube - 유튜브 음원 다운로드</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #1a1d24;
+    --card-hover: #22262f;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --accent: #ff4d4d;
+    --accent-dark: #d93b3b;
+    --ok: #34c77b;
+    --border: #2a2e37;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 20px; }
+  header { text-align: center; margin-bottom: 32px; }
+  header h1 { font-size: 2.2rem; letter-spacing: -0.5px; }
+  header h1 .up { color: var(--accent); }
+  header p { color: var(--muted); margin-top: 8px; font-size: 0.95rem; }
+
+  .search-box { display: flex; gap: 10px; margin-bottom: 28px; }
+  .search-box input {
+    flex: 1;
+    padding: 14px 18px;
+    font-size: 1rem;
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-box button {
+    padding: 14px 26px;
+    font-size: 1rem;
+    font-weight: 600;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+  .search-box button:hover { background: var(--accent-dark); }
+  .search-box button:disabled { opacity: 0.6; cursor: wait; }
+
+  .status { text-align: center; color: var(--muted); margin: 24px 0; min-height: 1.4em; }
+  .status.error { color: var(--accent); }
+
+  .results { display: flex; flex-direction: column; gap: 14px; }
+  .card {
+    display: flex;
+    gap: 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px;
+    align-items: center;
+    transition: background 0.15s;
+  }
+  .card:hover { background: var(--card-hover); }
+  .thumb-wrap { position: relative; flex-shrink: 0; }
+  .thumb-wrap img {
+    width: 168px;
+    height: 94px;
+    object-fit: cover;
+    border-radius: 10px;
+    background: #000;
+    display: block;
+  }
+  .duration {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    border-radius: 5px;
+  }
+  .info { flex: 1; min-width: 0; }
+  .info .title {
+    font-size: 1.02rem;
+    font-weight: 600;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .info .meta { color: var(--muted); font-size: 0.85rem; margin-top: 6px; }
+  .dl-btn {
+    flex-shrink: 0;
+    padding: 11px 20px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    background: transparent;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    min-width: 128px;
+  }
+  .dl-btn:hover:not(:disabled) { background: var(--accent); color: #fff; }
+  .dl-btn:disabled { cursor: wait; opacity: 0.75; }
+  .dl-btn.done { border-color: var(--ok); color: var(--ok); }
+
+  @media (max-width: 640px) {
+    .card { flex-direction: column; align-items: stretch; }
+    .thumb-wrap img { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+    .dl-btn { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1><span class="up">Up</span>Tube</h1>
+    <p>유튜브 링크 또는 검색어를 입력하고, 원하는 영상의 음원을 MP3로 받으세요.</p>
+  </header>
+
+  <form class="search-box" id="searchForm">
+    <input id="queryInput" type="text" autocomplete="off"
+           placeholder="유튜브 링크 붙여넣기 또는 검색어 입력 (예: 아이유 밤편지)" autofocus>
+    <button type="submit" id="searchBtn">검색</button>
+  </form>
+
+  <div class="status" id="status"></div>
+  <div class="results" id="results"></div>
+</div>
+
+<script>
+const form = document.getElementById('searchForm');
+const input = document.getElementById('queryInput');
+const searchBtn = document.getElementById('searchBtn');
+const statusEl = document.getElementById('status');
+const resultsEl = document.getElementById('results');
+
+function setStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.classList.toggle('error', isError);
+}
+
+function formatDuration(sec) {
+  if (sec == null) return '';
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const mm = h ? String(m).padStart(2, '0') : String(m);
+  const ss = String(s).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+function formatViews(n) {
+  if (n == null) return '';
+  if (n >= 1e8) return `조회수 ${(n / 1e8).toFixed(1)}억회`;
+  if (n >= 1e4) return `조회수 ${(n / 1e4).toFixed(1)}만회`;
+  return `조회수 ${n.toLocaleString()}회`;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = input.value.trim();
+  if (!q) return;
+
+  searchBtn.disabled = true;
+  resultsEl.innerHTML = '';
+  setStatus('검색 중...');
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '검색에 실패했습니다.');
+    setStatus(`${data.items.length}개의 결과`);
+    data.items.forEach(renderCard);
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    searchBtn.disabled = false;
+  }
+});
+
+function renderCard(item) {
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const thumbWrap = document.createElement('div');
+  thumbWrap.className = 'thumb-wrap';
+  const img = document.createElement('img');
+  img.src = item.thumbnail;
+  img.alt = '';
+  img.loading = 'lazy';
+  thumbWrap.appendChild(img);
+  if (item.duration != null) {
+    const dur = document.createElement('span');
+    dur.className = 'duration';
+    dur.textContent = formatDuration(item.duration);
+    thumbWrap.appendChild(dur);
+  }
+
+  const info = document.createElement('div');
+  info.className = 'info';
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = item.title;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = [item.channel, formatViews(item.view_count)]
+    .filter(Boolean).join(' · ');
+  info.append(title, meta);
+
+  const btn = document.createElement('button');
+  btn.className = 'dl-btn';
+  btn.textContent = 'MP3 다운로드';
+  btn.addEventListener('click', () => downloadAudio(item, btn));
+
+  card.append(thumbWrap, info, btn);
+  resultsEl.appendChild(card);
+}
+
+function filenameFromDisposition(header, fallback) {
+  if (!header) return fallback;
+  const star = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (star) return decodeURIComponent(star[1]);
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1] : fallback;
+}
+
+async function downloadAudio(item, btn) {
+  btn.disabled = true;
+  btn.classList.remove('done');
+  btn.textContent = '변환 중...';
+  try {
+    const res = await fetch(`/api/download/${encodeURIComponent(item.id)}`);
+    if (!res.ok) {
+      let msg = '다운로드에 실패했습니다.';
+      try { msg = (await res.json()).error || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    btn.textContent = '저장 중...';
+    const blob = await res.blob();
+    const name = filenameFromDisposition(
+      res.headers.get('Content-Disposition'), `${item.title}.mp3`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    btn.textContent = '완료 ✓';
+    btn.classList.add('done');
+  } catch (err) {
+    setStatus(err.message, true);
+    btn.textContent = '다시 시도';
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
