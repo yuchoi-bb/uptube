@@ -22,11 +22,32 @@ finally:
 PY
 }
 
+check_deps() {
+  if ! python3 -c "import flask, yt_dlp, requests" 2>/dev/null; then
+    echo "!! 필수 파이썬 패키지가 없습니다. 먼저 설치하세요:"
+    echo "   pip install -r requirements.txt"
+    exit 1
+  fi
+}
+
 start() {
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "이미 실행 중입니다. (tmux 세션: $SESSION)"
     exit 0
   fi
+  check_deps
+
+  # 세션은 없는데 포트가 열려 있으면 이전 서버 프로세스가 남은 것 → 정리
+  if port_open; then
+    echo "포트 $PORT 를 쓰는 이전 서버 프로세스를 정리합니다..."
+    pkill -f "python3 app.py" 2>/dev/null || true
+    sleep 2
+    if port_open; then
+      echo "!! 포트 $PORT 가 여전히 사용 중입니다. 다른 프로그램을 종료하거나 PORT=9000 ./run.sh 로 실행하세요."
+      exit 1
+    fi
+  fi
+
   tmux new-session -d -s "$SESSION" -c "$DIR" "PORT=$PORT python3 app.py 2>&1 | tee -a uptube.log"
 
   # 서버가 실제로 뜰 때까지 최대 10초 대기, 실패 시 로그를 보여준다
