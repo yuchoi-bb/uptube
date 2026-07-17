@@ -63,6 +63,7 @@
   .results { display: flex; flex-direction: column; gap: 14px; }
   .card {
     display: flex;
+    flex-wrap: wrap;
     gap: 16px;
     background: var(--card);
     border: 1px solid var(--border);
@@ -102,27 +103,44 @@
     overflow: hidden;
   }
   .info .meta { color: var(--muted); font-size: 0.85rem; margin-top: 6px; }
-  .dl-btn {
+  .actions {
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .dl-btn, .pv-btn {
     padding: 11px 20px;
     font-size: 0.92rem;
     font-weight: 600;
     background: transparent;
-    color: var(--accent);
-    border: 1.5px solid var(--accent);
     border-radius: 10px;
     cursor: pointer;
     transition: all 0.15s;
     min-width: 128px;
   }
+  .dl-btn {
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+  }
   .dl-btn:hover:not(:disabled) { background: var(--accent); color: #fff; }
   .dl-btn:disabled { cursor: wait; opacity: 0.75; }
   .dl-btn.done { border-color: var(--ok); color: var(--ok); }
+  .pv-btn {
+    color: var(--text);
+    border: 1.5px solid var(--border);
+  }
+  .pv-btn:hover { border-color: var(--muted); }
+  .pv-btn.playing { border-color: var(--ok); color: var(--ok); }
+
+  .player-row { flex-basis: 100%; }
+  .player-row audio { width: 100%; height: 40px; }
 
   @media (max-width: 640px) {
     .card { flex-direction: column; align-items: stretch; }
     .thumb-wrap img { width: 100%; height: auto; aspect-ratio: 16 / 9; }
-    .dl-btn { width: 100%; }
+    .actions { flex-direction: row; }
+    .dl-btn, .pv-btn { flex: 1; }
   }
 </style>
 </head>
@@ -223,13 +241,61 @@ function renderCard(item) {
     .filter(Boolean).join(' · ');
   info.append(title, meta);
 
-  const btn = document.createElement('button');
-  btn.className = 'dl-btn';
-  btn.textContent = 'MP3 다운로드';
-  btn.addEventListener('click', () => downloadAudio(item, btn));
+  const actions = document.createElement('div');
+  actions.className = 'actions';
 
-  card.append(thumbWrap, info, btn);
+  const pvBtn = document.createElement('button');
+  pvBtn.className = 'pv-btn';
+  pvBtn.textContent = '▶ 미리듣기';
+  pvBtn.addEventListener('click', () => togglePreview(item, pvBtn, card));
+
+  const dlBtn = document.createElement('button');
+  dlBtn.className = 'dl-btn';
+  dlBtn.textContent = 'MP3 다운로드';
+  dlBtn.addEventListener('click', () => downloadAudio(item, dlBtn));
+
+  actions.append(pvBtn, dlBtn);
+  card.append(thumbWrap, info, actions);
   resultsEl.appendChild(card);
+}
+
+let activePlayer = null; // { audio, btn, row } - 동시에 하나만 재생
+
+function stopPreview() {
+  if (!activePlayer) return;
+  const { audio, btn, row } = activePlayer;
+  activePlayer = null;
+  audio.pause();
+  audio.removeAttribute('src');
+  row.remove();
+  btn.textContent = '▶ 미리듣기';
+  btn.classList.remove('playing');
+}
+
+function togglePreview(item, btn, card) {
+  const wasActive = activePlayer && activePlayer.btn === btn;
+  stopPreview();
+  if (wasActive) return;
+
+  const row = document.createElement('div');
+  row.className = 'player-row';
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.autoplay = true;
+  audio.preload = 'auto';
+  audio.src = `/api/preview/${encodeURIComponent(item.id)}`;
+  audio.addEventListener('error', () => {
+    if (activePlayer && activePlayer.audio === audio) {
+      setStatus('미리듣기를 불러오지 못했습니다. 잠시 후 다시 시도하세요.', true);
+      stopPreview();
+    }
+  });
+  row.appendChild(audio);
+  card.appendChild(row);
+
+  btn.textContent = '■ 중지';
+  btn.classList.add('playing');
+  activePlayer = { audio, btn, row };
 }
 
 function filenameFromDisposition(header, fallback) {

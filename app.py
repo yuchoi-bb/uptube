@@ -8,8 +8,20 @@ import os
 import re
 import shutil
 import tempfile
+import threading
+import time
 
-from flask import Flask, abort, jsonify, render_template, request, send_file
+import requests
+from flask import (
+    Flask,
+    Response,
+    abort,
+    jsonify,
+    render_template,
+    request,
+    send_file,
+    stream_with_context,
+)
 import yt_dlp
 
 app = Flask(__name__)
@@ -88,6 +100,92 @@ def search():
     if not items:
         return jsonify({"error": "결과가 없습니다."}), 404
     return jsonify({"items": items})
+
+
+AUDIO_MIME_BY_EXT = {
+    "m4a": "audio/mp4",
+    "mp4": "audio/mp4",
+    "webm": "audio/webm",
+    "opus": "audio/ogg",
+    "mp3": "audio/mpeg",
+}
+PREVIEW_CACHE_TTL = 300  # 초. googlevideo 직링크는 만료되므로 짧게 캐시
+
+_preview_cache: dict[str, dict] = {}
+_preview_lock = threading.Lock()
+
+
+def _get_preview_stream(video_id: str) -> dict:
+    """미리듣기용 오디오 직링크를 얻는다. Range 요청마다 재추출하지 않도록 캐시."""
+    now = time.time()
+    with _preview_lock:
+        cached = _preview_cache.get(video_id)
+        if cached and cached["expires"] > now:
+            return cached
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "format": "bestaudio[ext=m4a]/bestaudio[acodec!=none]/best",
+    }
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(
+            f"https://www.youtube.com/watch?v={video_id}", download=False
+        )
+
+    stream = {
+        "url": info["url"],
+        "headers": dict(info.get("http_headers") or {}),
+        "mime": AUDIO_MIME_BY_EXT.get(info.get("ext"), "audio/mp4"),
+        "expires": now + PREVIEW_CACHE_TTL,
+    }
+    with _preview_lock:
+        _preview_cache[video_id] = stream
+    return stream
+
+
+def _drop_preview_cache(video_id: str) -> None:
+    with _preview_lock:
+        _preview_cache.pop(video_id, None)
+
+
+@app.route("/api/preview/<video_id>")
+def preview(video_id: str):
+    """오디오를 서버 경유로 스트리밍한다. <audio> 탐색을 위해 Range를 그대로 전달."""
+    if not VIDEO_ID_RE.fullmatch(video_id):
+        abort(400)
+
+    try:
+        stream = _get_preview_stream(video_id)
+    except Exception as exc:  # noqa: BLE001 - 사용자에게 실패 사유를 전달
+        return jsonify({"error": f"미리듣기 준비에 실패했습니다: {exc}"}), 502
+
+    upstream_headers = dict(stream["headers"])
+    range_header = request.headers.get("Range")
+    if range_header:
+        upstream_headers["Range"] = range_header
+
+    try:
+        upstream = requests.get(
+            stream["url"], headers=upstream_headers, stream=True, timeout=20
+        )
+    except requests.RequestException as exc:
+        _drop_preview_cache(video_id)
+        return jsonify({"error": f"스트림 연결에 실패했습니다: {exc}"}), 502
+
+    if upstream.status_code not in (200, 206):
+        upstream.close()
+        _drop_preview_cache(video_id)  # 직링크 만료(403 등) 시 다음 요청에서 재추출
+        return jsonify({"error": "스트림이 만료되었습니다. 다시 시도하세요."}), 502
+
+    response_headers = {"Content-Type": stream["mime"], "Cache-Control": "no-store"}
+    for name in ("Content-Length", "Content-Range", "Accept-Ranges"):
+        if name in upstream.headers:
+            response_headers[name] = upstream.headers[name]
+
+    body = stream_with_context(upstream.iter_content(chunk_size=64 * 1024))
+    return Response(body, status=upstream.status_code, headers=response_headers)
 
 
 @app.route("/api/download/<video_id>")
