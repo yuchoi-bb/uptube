@@ -31,8 +31,21 @@ PORT=9000 ./run.sh  # 다른 포트로 실행
 브라우저에서 `http://<서버주소>:8000` 접속 후:
 
 1. 유튜브 링크(영상/재생목록) 또는 검색어를 입력
-2. 결과 목록에서 원하는 영상의 **MP3 다운로드** 클릭
-3. 서버가 음원을 추출·변환한 뒤 `영상제목.mp3` 로 저장됨
+2. **▶ 미리듣기**로 음원을 확인
+3. **MP3 다운로드** 클릭 → 서버가 추출·변환해 `영상제목.mp3` 로 저장
+
+### 저장 위치
+
+서버가 직접 파일을 저장합니다. 기본 위치는 자동 감지:
+
+| 환경 | 저장 폴더 |
+|---|---|
+| Termux (termux-setup-storage 완료) | `/storage/emulated/0/Download/uptube` |
+| 일반 리눅스/맥 | `~/Downloads/uptube` |
+| 그 외 | 프로젝트 내 `downloads/` |
+
+다른 위치를 쓰려면: `UPTUBE_DOWNLOAD_DIR=/원하는/경로 ./run.sh`
+같은 제목이 이미 있으면 `제목 (1).mp3` 처럼 번호가 붙습니다.
 
 ## Termux(안드로이드)에서 실행
 
@@ -41,12 +54,15 @@ PORT=9000 ./run.sh  # 다른 포트로 실행
 pkg update && pkg upgrade
 pkg install python ffmpeg git tmux
 
-# 2. 코드 받기
+# 2. 저장소(Download 폴더) 접근 권한 부여 - 최초 1회, 팝업에서 허용 선택
+termux-setup-storage
+
+# 3. 코드 받기
 git clone https://github.com/yuchoi-bb/uptube.git
 cd uptube
 pip install -r requirements.txt
 
-# 3. 서버 시작 (tmux 세션으로 백그라운드 실행)
+# 4. 서버 시작 (tmux 세션으로 백그라운드 실행)
 ./run.sh
 ```
 

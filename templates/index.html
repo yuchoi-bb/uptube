@@ -298,39 +298,18 @@ function togglePreview(item, btn, card) {
   activePlayer = { audio, btn, row };
 }
 
-function filenameFromDisposition(header, fallback) {
-  if (!header) return fallback;
-  const star = header.match(/filename\*=UTF-8''([^;]+)/i);
-  if (star) return decodeURIComponent(star[1]);
-  const plain = header.match(/filename="?([^";]+)"?/i);
-  return plain ? plain[1] : fallback;
-}
-
 async function downloadAudio(item, btn) {
   btn.disabled = true;
   btn.classList.remove('done');
   btn.textContent = '변환 중...';
   try {
     const res = await fetch(`/api/download/${encodeURIComponent(item.id)}`);
-    if (!res.ok) {
-      let msg = '다운로드에 실패했습니다.';
-      try { msg = (await res.json()).error || msg; } catch (_) {}
-      throw new Error(msg);
-    }
-    btn.textContent = '저장 중...';
-    const blob = await res.blob();
-    const name = filenameFromDisposition(
-      res.headers.get('Content-Disposition'), `${item.title}.mp3`);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    btn.textContent = '완료 ✓';
+    let data = {};
+    try { data = await res.json(); } catch (_) {}
+    if (!res.ok) throw new Error(data.error || '다운로드에 실패했습니다.');
+    btn.textContent = '저장 완료 ✓';
     btn.classList.add('done');
+    setStatus(`저장됨: ${data.saved || data.filename}`);
   } catch (err) {
     setStatus(err.message, true);
     btn.textContent = '다시 시도';

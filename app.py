@@ -19,7 +19,6 @@ from flask import (
     jsonify,
     render_template,
     request,
-    send_file,
     stream_with_context,
 )
 import yt_dlp
@@ -33,6 +32,37 @@ VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{5,20}")
 UNSAFE_FILENAME_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 SEARCH_LIMIT = 15
+
+
+def resolve_download_dir() -> str:
+    """mp3 저장 폴더. 기본은 안드로이드 Download/uptube (Termux 기준)."""
+    env = os.environ.get("UPTUBE_DOWNLOAD_DIR")
+    if env:
+        return os.path.abspath(os.path.expanduser(env))
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, "storage", "downloads"),  # Termux (termux-setup-storage)
+        "/storage/emulated/0/Download",  # 안드로이드 직접 경로
+        os.path.join(home, "Downloads"),  # 일반 리눅스/맥
+        os.path.join(home, "Download"),
+    ]
+    for base in candidates:
+        if os.path.isdir(base):
+            return os.path.join(base, "uptube")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "downloads")
+
+
+DOWNLOAD_DIR = resolve_download_dir()
+
+
+def unique_path(directory: str, stem: str, ext: str) -> str:
+    """같은 제목이 이미 있으면 '제목 (1).mp3' 식으로 피한다."""
+    path = os.path.join(directory, f"{stem}{ext}")
+    n = 1
+    while os.path.exists(path):
+        path = os.path.join(directory, f"{stem} ({n}){ext}")
+        n += 1
+    return path
 
 
 def is_youtube_url(query: str) -> bool:
@@ -222,17 +252,20 @@ def download(video_id: str):
                 raise RuntimeError("다운로드된 파일을 찾을 수 없습니다.")
             audio_path = os.path.join(tmpdir, files[0])
 
-        response = send_file(
-            audio_path,
-            as_attachment=True,
-            download_name=sanitize_filename(title) + ".mp3",
-            mimetype="audio/mpeg",
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+        dest = unique_path(DOWNLOAD_DIR, sanitize_filename(title), ".mp3")
+        shutil.move(audio_path, dest)
+        return jsonify(
+            {
+                "saved": dest,
+                "filename": os.path.basename(dest),
+                "folder": DOWNLOAD_DIR,
+            }
         )
-        response.call_on_close(lambda: shutil.rmtree(tmpdir, ignore_errors=True))
-        return response
     except Exception as exc:  # noqa: BLE001 - 사용자에게 실패 사유를 전달
-        shutil.rmtree(tmpdir, ignore_errors=True)
         return jsonify({"error": f"다운로드에 실패했습니다: {exc}"}), 502
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 if __name__ == "__main__":
