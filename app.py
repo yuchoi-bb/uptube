@@ -10,6 +10,8 @@ import shutil
 import tempfile
 import threading
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from flask import (
@@ -63,6 +65,109 @@ def unique_path(directory: str, stem: str, ext: str) -> str:
         path = os.path.join(directory, f"{stem} ({n}){ext}")
         n += 1
     return path
+
+
+# ---------------------------------------------------------------------------
+# 백그라운드 다운로드 작업 관리
+# ---------------------------------------------------------------------------
+
+MAX_CONCURRENT_DOWNLOADS = 3
+MAX_FINISHED_JOBS = 50  # 완료/실패 작업은 이만큼만 메모리에 유지
+
+ACTIVE_STATUSES = ("queued", "downloading", "converting")
+
+_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS)
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+
+
+def _trim_finished_jobs() -> None:
+    """호출 전 _jobs_lock을 잡고 있어야 한다."""
+    finished = [j for j in _jobs.values() if j["status"] not in ACTIVE_STATUSES]
+    if len(finished) <= MAX_FINISHED_JOBS:
+        return
+    finished.sort(key=lambda j: j.get("finished_at") or 0)
+    for job in finished[: len(finished) - MAX_FINISHED_JOBS]:
+        _jobs.pop(job["id"], None)
+
+
+def _run_download_job(job_id: str) -> None:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        return
+
+    video_id = job["video_id"]
+    tmpdir = tempfile.mkdtemp(prefix="uptube_")
+
+    def progress_hook(d: dict) -> None:
+        status = d.get("status")
+        with _jobs_lock:
+            if status == "downloading":
+                job["status"] = "downloading"
+                job["downloaded_bytes"] = d.get("downloaded_bytes") or 0
+                job["total_bytes"] = (
+                    d.get("total_bytes") or d.get("total_bytes_estimate")
+                )
+                job["speed"] = d.get("speed")
+            elif status == "finished":
+                job["status"] = "converting"
+                job["speed"] = None
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
+        "progress_hooks": [progress_hook],
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+    }
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/watch?v={video_id}", download=True
+            )
+
+        title = info.get("title") or job["title"] or video_id
+        audio_path = os.path.join(tmpdir, f"{video_id}.mp3")
+        if not os.path.exists(audio_path):
+            files = os.listdir(tmpdir)
+            if not files:
+                raise RuntimeError("다운로드된 파일을 찾을 수 없습니다.")
+            audio_path = os.path.join(tmpdir, files[0])
+
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+        dest = unique_path(DOWNLOAD_DIR, sanitize_filename(title), ".mp3")
+        file_size = os.path.getsize(audio_path)
+        shutil.move(audio_path, dest)
+        with _jobs_lock:
+            job.update(
+                status="done",
+                title=title,
+                filename=os.path.basename(dest),
+                saved=dest,
+                total_bytes=file_size,
+                downloaded_bytes=file_size,
+                speed=None,
+                finished_at=time.time(),
+            )
+    except Exception as exc:  # noqa: BLE001 - 실패 사유를 작업 상태로 전달
+        with _jobs_lock:
+            job.update(
+                status="error",
+                error=str(exc)[:300],
+                speed=None,
+                finished_at=time.time(),
+            )
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def is_youtube_url(query: str) -> bool:
@@ -218,54 +323,71 @@ def preview(video_id: str):
     return Response(body, status=upstream.status_code, headers=response_headers)
 
 
-@app.route("/api/download/<video_id>")
+@app.route("/api/download/<video_id>", methods=["POST"])
 def download(video_id: str):
+    """다운로드 작업을 등록하고 즉시 반환한다. 진행 상황은 /api/jobs 로 조회."""
     if not VIDEO_ID_RE.fullmatch(video_id):
         abort(400)
 
-    tmpdir = tempfile.mkdtemp(prefix="uptube_")
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }
-        ],
-    }
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(
-                f"https://www.youtube.com/watch?v={video_id}", download=True
-            )
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "").strip() or video_id
 
-        title = info.get("title") or video_id
-        audio_path = os.path.join(tmpdir, f"{video_id}.mp3")
-        if not os.path.exists(audio_path):
-            files = os.listdir(tmpdir)
-            if not files:
-                raise RuntimeError("다운로드된 파일을 찾을 수 없습니다.")
-            audio_path = os.path.join(tmpdir, files[0])
+    with _jobs_lock:
+        for existing in _jobs.values():
+            if (
+                existing["video_id"] == video_id
+                and existing["status"] in ACTIVE_STATUSES
+            ):
+                return jsonify({"job": dict(existing), "duplicate": True}), 200
 
-        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-        dest = unique_path(DOWNLOAD_DIR, sanitize_filename(title), ".mp3")
-        shutil.move(audio_path, dest)
-        return jsonify(
-            {
-                "saved": dest,
-                "filename": os.path.basename(dest),
-                "folder": DOWNLOAD_DIR,
-            }
+        job = {
+            "id": uuid.uuid4().hex[:12],
+            "video_id": video_id,
+            "title": title,
+            "status": "queued",
+            "downloaded_bytes": 0,
+            "total_bytes": None,
+            "speed": None,
+            "filename": None,
+            "saved": None,
+            "error": None,
+            "created_at": time.time(),
+            "finished_at": None,
+        }
+        _jobs[job["id"]] = job
+        _trim_finished_jobs()
+
+    _executor.submit(_run_download_job, job["id"])
+    return jsonify({"job": dict(job)}), 202
+
+
+@app.route("/api/jobs")
+def jobs():
+    """진행 중/최근 작업 목록과 저장 폴더의 파일 이력."""
+    with _jobs_lock:
+        job_list = sorted(
+            (dict(j) for j in _jobs.values()),
+            key=lambda j: j["created_at"],
+            reverse=True,
         )
-    except Exception as exc:  # noqa: BLE001 - 사용자에게 실패 사유를 전달
-        return jsonify({"error": f"다운로드에 실패했습니다: {exc}"}), 502
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    files = []
+    if os.path.isdir(DOWNLOAD_DIR):
+        for name in os.listdir(DOWNLOAD_DIR):
+            if not name.lower().endswith(".mp3"):
+                continue
+            path = os.path.join(DOWNLOAD_DIR, name)
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            files.append({"name": name, "size": stat.st_size, "mtime": stat.st_mtime})
+        files.sort(key=lambda f: f["mtime"], reverse=True)
+
+    active = sum(1 for j in job_list if j["status"] in ACTIVE_STATUSES)
+    return jsonify(
+        {"jobs": job_list, "files": files, "folder": DOWNLOAD_DIR, "active": active}
+    )
 
 
 if __name__ == "__main__":

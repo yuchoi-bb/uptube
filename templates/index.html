@@ -29,6 +29,37 @@
   header h1 .up { color: var(--accent); }
   header p { color: var(--muted); margin-top: 8px; font-size: 0.95rem; }
 
+  .tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 12px 22px;
+    font-size: 1rem;
+    font-weight: 600;
+    background: none;
+    color: var(--muted);
+    border: none;
+    border-bottom: 2.5px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .badge {
+    display: inline-block;
+    min-width: 20px;
+    padding: 1px 6px;
+    margin-left: 4px;
+    font-size: 0.78rem;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 10px;
+    text-align: center;
+  }
+
   .search-box { display: flex; gap: 10px; margin-bottom: 28px; }
   .search-box input {
     flex: 1;
@@ -136,6 +167,97 @@
   .player-row { flex-basis: 100%; }
   .player-row audio { width: 100%; height: 40px; }
 
+  .section-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 26px 0 12px;
+    color: var(--text);
+  }
+  .job-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .job-card .job-title {
+    font-weight: 600;
+    font-size: 0.98rem;
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .job-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: 7px;
+    flex-wrap: wrap;
+  }
+  .job-state { font-weight: 600; }
+  .job-state.downloading { color: #5aa9ff; }
+  .job-state.converting { color: #f0b342; }
+  .job-state.done { color: var(--ok); }
+  .job-state.error { color: var(--accent); }
+  .progress {
+    height: 8px;
+    background: var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .progress > div {
+    height: 100%;
+    background: linear-gradient(90deg, #5aa9ff, #7cc0ff);
+    border-radius: 5px;
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+  .progress.indeterminate > div {
+    width: 35%;
+    animation: slide 1.2s linear infinite;
+  }
+  @keyframes slide {
+    from { margin-left: -35%; }
+    to { margin-left: 100%; }
+  }
+  .job-error { color: var(--accent); font-size: 0.83rem; margin-top: 7px; word-break: break-all; }
+
+  .file-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+  }
+  .file-row .file-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.93rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file-row .file-meta {
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: 0.83rem;
+    text-align: right;
+  }
+  .folder-path {
+    color: var(--muted);
+    font-size: 0.83rem;
+    margin-bottom: 14px;
+    word-break: break-all;
+  }
+  .empty-note { color: var(--muted); text-align: center; padding: 20px 0; }
+
   @media (max-width: 640px) {
     .card { flex-direction: column; align-items: stretch; }
     .thumb-wrap img { width: 100%; height: auto; aspect-ratio: 16 / 9; }
@@ -151,14 +273,29 @@
     <p>유튜브 링크 또는 검색어를 입력하고, 원하는 영상의 음원을 MP3로 받으세요.</p>
   </header>
 
-  <form class="search-box" id="searchForm">
-    <input id="queryInput" type="text" autocomplete="off"
-           placeholder="유튜브 링크 붙여넣기 또는 검색어 입력 (예: 아이유 밤편지)" autofocus>
-    <button type="submit" id="searchBtn">검색</button>
-  </form>
+  <nav class="tabs">
+    <button class="tab active" id="tabSearch">검색</button>
+    <button class="tab" id="tabDownloads">다운로드<span class="badge" id="dlBadge" hidden>0</span></button>
+  </nav>
 
-  <div class="status" id="status"></div>
-  <div class="results" id="results"></div>
+  <div id="searchView">
+    <form class="search-box" id="searchForm">
+      <input id="queryInput" type="text" autocomplete="off"
+             placeholder="유튜브 링크 붙여넣기 또는 검색어 입력 (예: 아이유 밤편지)" autofocus>
+      <button type="submit" id="searchBtn">검색</button>
+    </form>
+
+    <div class="status" id="status"></div>
+    <div class="results" id="results"></div>
+  </div>
+
+  <div id="downloadsView" hidden>
+    <div class="folder-path" id="folderPath"></div>
+    <div class="section-title">진행 중 / 최근 작업</div>
+    <div id="jobList"><div class="empty-note">진행 중인 다운로드가 없습니다.</div></div>
+    <div class="section-title">완료된 파일</div>
+    <div id="fileList"><div class="empty-note">저장된 파일이 없습니다.</div></div>
+  </div>
 </div>
 
 <script>
@@ -301,22 +438,182 @@ function togglePreview(item, btn, card) {
 async function downloadAudio(item, btn) {
   btn.disabled = true;
   btn.classList.remove('done');
-  btn.textContent = '변환 중...';
+  btn.textContent = '등록 중...';
   try {
-    const res = await fetch(`/api/download/${encodeURIComponent(item.id)}`);
+    const res = await fetch(`/api/download/${encodeURIComponent(item.id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: item.title }),
+    });
     let data = {};
     try { data = await res.json(); } catch (_) {}
-    if (!res.ok) throw new Error(data.error || '다운로드에 실패했습니다.');
-    btn.textContent = '저장 완료 ✓';
+    if (!res.ok) throw new Error(data.error || '다운로드 등록에 실패했습니다.');
+    btn.textContent = data.duplicate ? '이미 진행 중' : '다운로드 시작 ✓';
     btn.classList.add('done');
-    setStatus(`저장됨: ${data.saved || data.filename}`);
+    setStatus("백그라운드에서 다운로드합니다. '다운로드' 탭에서 진행 상황을 확인하세요.");
+    pollJobs();
   } catch (err) {
     setStatus(err.message, true);
     btn.textContent = '다시 시도';
-  } finally {
     btn.disabled = false;
   }
 }
+
+// ---------------------------------------------------------------------------
+// 탭 전환 + 다운로드 현황 폴링
+// ---------------------------------------------------------------------------
+
+const tabSearch = document.getElementById('tabSearch');
+const tabDownloads = document.getElementById('tabDownloads');
+const searchView = document.getElementById('searchView');
+const downloadsView = document.getElementById('downloadsView');
+const dlBadge = document.getElementById('dlBadge');
+const jobListEl = document.getElementById('jobList');
+const fileListEl = document.getElementById('fileList');
+const folderPathEl = document.getElementById('folderPath');
+
+function switchTab(name) {
+  const showSearch = name === 'search';
+  tabSearch.classList.toggle('active', showSearch);
+  tabDownloads.classList.toggle('active', !showSearch);
+  searchView.hidden = !showSearch;
+  downloadsView.hidden = showSearch;
+  if (!showSearch) pollJobs();
+}
+tabSearch.addEventListener('click', () => switchTab('search'));
+tabDownloads.addEventListener('click', () => switchTab('downloads'));
+
+function formatBytes(n) {
+  if (n == null) return '?';
+  if (n >= 1024 * 1024 * 1024) return (n / (1024 ** 3)).toFixed(2) + ' GB';
+  if (n >= 1024 * 1024) return (n / (1024 ** 2)).toFixed(1) + ' MB';
+  if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+  return n + ' B';
+}
+
+const JOB_STATE_LABEL = {
+  queued: '대기 중',
+  downloading: '다운로드 중',
+  converting: 'MP3 변환 중',
+  done: '완료',
+  error: '실패',
+};
+
+function renderJobs(jobs) {
+  jobListEl.innerHTML = '';
+  if (!jobs.length) {
+    jobListEl.innerHTML = '<div class="empty-note">진행 중인 다운로드가 없습니다.</div>';
+    return;
+  }
+  jobs.forEach((job) => {
+    const card = document.createElement('div');
+    card.className = 'job-card';
+
+    const title = document.createElement('div');
+    title.className = 'job-title';
+    title.textContent = job.filename || job.title;
+    card.appendChild(title);
+
+    if (job.status === 'downloading' || job.status === 'converting' || job.status === 'queued') {
+      const bar = document.createElement('div');
+      bar.className = 'progress';
+      const fill = document.createElement('div');
+      const pct = job.total_bytes
+        ? Math.min(100, (job.downloaded_bytes / job.total_bytes) * 100) : null;
+      if (job.status === 'downloading' && pct != null) {
+        fill.style.width = pct.toFixed(1) + '%';
+      } else {
+        bar.classList.add('indeterminate');
+      }
+      bar.appendChild(fill);
+      card.appendChild(bar);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'job-meta';
+    const state = document.createElement('span');
+    state.className = `job-state ${job.status}`;
+    state.textContent = JOB_STATE_LABEL[job.status] || job.status;
+    meta.appendChild(state);
+
+    const detail = document.createElement('span');
+    if (job.status === 'downloading') {
+      const pct = job.total_bytes
+        ? ` (${((job.downloaded_bytes / job.total_bytes) * 100).toFixed(0)}%)` : '';
+      const speed = job.speed ? ` · ${formatBytes(job.speed)}/s` : '';
+      detail.textContent =
+        `${formatBytes(job.downloaded_bytes)} / ${formatBytes(job.total_bytes)}${pct}${speed}`;
+    } else if (job.status === 'done') {
+      detail.textContent = formatBytes(job.total_bytes);
+    }
+    meta.appendChild(detail);
+    card.appendChild(meta);
+
+    if (job.status === 'error' && job.error) {
+      const err = document.createElement('div');
+      err.className = 'job-error';
+      err.textContent = job.error;
+      card.appendChild(err);
+    }
+    jobListEl.appendChild(card);
+  });
+}
+
+function renderFiles(files) {
+  fileListEl.innerHTML = '';
+  if (!files.length) {
+    fileListEl.innerHTML = '<div class="empty-note">저장된 파일이 없습니다.</div>';
+    return;
+  }
+  files.forEach((f) => {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = f.name;
+    const meta = document.createElement('span');
+    meta.className = 'file-meta';
+    const when = new Date(f.mtime * 1000).toLocaleString('ko-KR', {
+      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+    meta.textContent = `${formatBytes(f.size)} · ${when}`;
+    row.append(name, meta);
+    fileListEl.appendChild(row);
+  });
+}
+
+let pollTimer = null;
+
+async function pollJobs() {
+  try {
+    const res = await fetch('/api/jobs');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (data.active > 0) {
+      dlBadge.textContent = data.active;
+      dlBadge.hidden = false;
+    } else {
+      dlBadge.hidden = true;
+    }
+    if (!downloadsView.hidden) {
+      folderPathEl.textContent = `저장 폴더: ${data.folder}`;
+      renderJobs(data.jobs);
+      renderFiles(data.files);
+    }
+    // 활성 작업이 있거나 다운로드 탭을 보는 중이면 빠르게, 아니면 느리게 폴링
+    scheduleNextPoll(data.active > 0 || !downloadsView.hidden ? 1000 : 5000);
+  } catch (_) {
+    scheduleNextPoll(5000);
+  }
+}
+
+function scheduleNextPoll(delay) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollJobs, delay);
+}
+
+pollJobs();
 </script>
 </body>
 </html>
