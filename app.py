@@ -185,8 +185,9 @@ def _run_download_job(job_id: str) -> None:
                     raise RuntimeError("다운로드된 파일을 찾을 수 없습니다.")
                 audio_path = os.path.join(tmpdir, files[0])
 
-            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-            dest = unique_path(DOWNLOAD_DIR, sanitize_filename(title), ".mp3")
+            target_dir = os.path.join(DOWNLOAD_DIR, job.get("folder") or "")
+            os.makedirs(target_dir, exist_ok=True)
+            dest = unique_path(target_dir, sanitize_filename(title), ".mp3")
             file_size = os.path.getsize(audio_path)
             shutil.move(audio_path, dest)
             with _jobs_lock:
@@ -380,6 +381,14 @@ def download(video_id: str):
     payload = request.get_json(silent=True) or {}
     title = (payload.get("title") or "").strip() or video_id
 
+    # 저장할 하위 폴더 (없으면 최상위). date_folder면 오늘 날짜 폴더를 덧붙인다.
+    folder = (payload.get("folder") or "").strip().strip("/")
+    if folder:
+        safe_dir(folder)  # 경로 탈출 검증
+    if payload.get("date_folder"):
+        today = time.strftime("%Y-%m-%d")
+        folder = os.path.join(folder, today) if folder else today
+
     with _jobs_lock:
         for existing in _jobs.values():
             if (
@@ -392,6 +401,7 @@ def download(video_id: str):
             "id": uuid.uuid4().hex[:12],
             "video_id": video_id,
             "title": title,
+            "folder": folder,
             "status": "queued",
             "downloaded_bytes": 0,
             "total_bytes": None,
@@ -447,80 +457,194 @@ def jobs():
             reverse=True,
         )
 
-    files = list_saved_files()
+    files = list_dir("")["files"]  # 다운로드 탭에는 최상위 폴더의 파일만
     active = sum(1 for j in job_list if j["status"] in ACTIVE_STATUSES)
     return jsonify(
         {"jobs": job_list, "files": files, "folder": DOWNLOAD_DIR, "active": active}
     )
 
 
-def list_saved_files() -> list[dict]:
-    """저장 폴더의 mp3 목록 (최신 순)."""
-    files = []
-    if os.path.isdir(DOWNLOAD_DIR):
-        for name in os.listdir(DOWNLOAD_DIR):
-            if not name.lower().endswith(".mp3"):
+def safe_dir(rel: str) -> str:
+    """저장 폴더 하위 폴더의 절대 경로 (경로 탈출 차단). rel이 비면 최상위."""
+    root = os.path.realpath(DOWNLOAD_DIR)
+    rel = (rel or "").strip().strip("/")
+    if not rel:
+        return root
+    path = os.path.realpath(os.path.join(root, rel))
+    if path != root and not path.startswith(root + os.sep):
+        abort(400)
+    return path
+
+
+def safe_entry(rel_path: str, must_be_file: bool = True) -> str:
+    """저장 폴더 안의 항목 경로. mp3 파일 또는 하위 폴더만 허용한다."""
+    rel_path = (rel_path or "").strip().strip("/")
+    if not rel_path:
+        abort(400)
+    parent = safe_dir(os.path.dirname(rel_path))
+    name = os.path.basename(rel_path)
+    if not name or name in (".", "..") or name.startswith("."):
+        abort(400)
+    path = os.path.realpath(os.path.join(parent, name))
+    root = os.path.realpath(DOWNLOAD_DIR)
+    if not path.startswith(root + os.sep):
+        abort(400)
+    if must_be_file:
+        if not path.lower().endswith(".mp3"):
+            abort(400)
+        if not os.path.isfile(path):
+            abort(404)
+    return path
+
+
+def list_dir(rel: str) -> dict:
+    """폴더 하나의 내용 (하위 폴더 + mp3 목록)."""
+    base = safe_dir(rel)
+    dirs, files = [], []
+    if os.path.isdir(base):
+        for name in os.listdir(base):
+            if name.startswith("."):
                 continue
-            path = os.path.join(DOWNLOAD_DIR, name)
+            path = os.path.join(base, name)
             try:
                 stat = os.stat(path)
             except OSError:
                 continue
-            files.append({"name": name, "size": stat.st_size, "mtime": stat.st_mtime})
-        files.sort(key=lambda f: f["mtime"], reverse=True)
-    return files
+            if os.path.isdir(path):
+                try:
+                    inner = os.listdir(path)
+                except OSError:
+                    inner = []
+                dirs.append(
+                    {
+                        "name": name,
+                        "mtime": stat.st_mtime,
+                        "count": sum(1 for n in inner if n.lower().endswith(".mp3")),
+                    }
+                )
+            elif name.lower().endswith(".mp3"):
+                files.append(
+                    {"name": name, "size": stat.st_size, "mtime": stat.st_mtime}
+                )
+    dirs.sort(key=lambda d: d["name"].lower())
+    files.sort(key=lambda f: f["mtime"], reverse=True)
+    return {"dirs": dirs, "files": files}
 
 
-def safe_file_path(name: str) -> str:
-    """저장 폴더 안의 mp3만 허용한다 (경로 탈출 차단)."""
-    if not name or os.path.basename(name) != name or name.startswith("."):
-        abort(400)
-    if not name.lower().endswith(".mp3"):
-        abort(400)
-    path = os.path.realpath(os.path.join(DOWNLOAD_DIR, name))
-    if os.path.dirname(path) != os.path.realpath(DOWNLOAD_DIR):
-        abort(400)
-    if not os.path.isfile(path):
-        abort(404)
-    return path
+def all_folders() -> list[str]:
+    """저장 폴더 아래 모든 하위 폴더의 상대 경로 (저장 위치 선택용)."""
+    root = os.path.realpath(DOWNLOAD_DIR)
+    found = []
+    if os.path.isdir(root):
+        for base, subdirs, _ in os.walk(root):
+            subdirs[:] = sorted(d for d in subdirs if not d.startswith("."))
+            if base != root:
+                found.append(os.path.relpath(base, root))
+    return sorted(found)
+
+
+# 폴더 이름으로 쓸 수 없는 문자
+FOLDER_NAME_RE = re.compile(r'^[^\\/:*?"<>|\x00-\x1f]{1,60}$')
 
 
 @app.route("/api/files")
 def files_list():
-    """파일 탐색기용 목록."""
-    files = list_saved_files()
+    """파일 탐색기용 목록. ?path=<하위 폴더 상대 경로>"""
+    rel = (request.args.get("path") or "").strip().strip("/")
+    safe_dir(rel)  # 경로 검증
+    content = list_dir(rel)
     return jsonify(
         {
-            "folder": DOWNLOAD_DIR,
-            "files": files,
-            "count": len(files),
-            "total_size": sum(f["size"] for f in files),
+            "root": DOWNLOAD_DIR,
+            "path": rel,
+            "folder": os.path.join(DOWNLOAD_DIR, rel) if rel else DOWNLOAD_DIR,
+            "dirs": content["dirs"],
+            "files": content["files"],
+            "count": len(content["files"]),
+            "total_size": sum(f["size"] for f in content["files"]),
+            "all_folders": all_folders(),
         }
     )
 
 
-@app.route("/api/files/<name>")
-def file_get(name: str):
-    """재생용 스트리밍(기본) 또는 보고 있는 기기로 저장(?download=1)."""
-    path = safe_file_path(name)
-    as_attachment = request.args.get("download") == "1"
+@app.route("/api/file")
+def file_get():
+    """재생용 스트리밍(기본) 또는 보고 있는 기기로 저장(?download=1). ?path=상대경로"""
+    rel = request.args.get("path") or ""
+    path = safe_entry(rel)
     return send_file(
         path,
         mimetype="audio/mpeg",
-        as_attachment=as_attachment,
-        download_name=name,
+        as_attachment=request.args.get("download") == "1",
+        download_name=os.path.basename(path),
         conditional=True,  # Range 지원 → 재생 바 탐색 가능
     )
 
 
-@app.route("/api/files/<name>", methods=["DELETE"])
-def file_delete(name: str):
-    path = safe_file_path(name)
+@app.route("/api/file", methods=["DELETE"])
+def file_delete():
+    path = safe_entry(request.args.get("path") or "")
     try:
         os.remove(path)
     except OSError as exc:
         return jsonify({"error": f"삭제에 실패했습니다: {exc}"}), 500
-    return jsonify({"deleted": name})
+    return jsonify({"deleted": os.path.basename(path)})
+
+
+@app.route("/api/file/move", methods=["POST"])
+def file_move():
+    """파일을 다른 폴더로 옮긴다."""
+    payload = request.get_json(silent=True) or {}
+    src = safe_entry(payload.get("from") or "")
+    dest_dir = safe_dir(payload.get("to") or "")
+    if not os.path.isdir(dest_dir):
+        return jsonify({"error": "대상 폴더가 없습니다."}), 404
+    name = os.path.basename(src)
+    if os.path.dirname(src) == dest_dir:
+        return jsonify({"moved": name, "unchanged": True})
+    stem, ext = os.path.splitext(name)
+    dest = unique_path(dest_dir, stem, ext)
+    try:
+        shutil.move(src, dest)
+    except OSError as exc:
+        return jsonify({"error": f"이동에 실패했습니다: {exc}"}), 500
+    return jsonify({"moved": os.path.basename(dest)})
+
+
+@app.route("/api/folder", methods=["POST"])
+def folder_create():
+    """하위 폴더를 만든다. {path: 부모 상대경로, name: 새 폴더 이름}"""
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()
+    if not FOLDER_NAME_RE.match(name) or name in (".", ".."):
+        return jsonify({"error": "폴더 이름에 쓸 수 없는 문자가 있습니다."}), 400
+    parent = safe_dir(payload.get("path") or "")
+    target = os.path.join(parent, name)
+    if os.path.exists(target):
+        return jsonify({"error": "같은 이름의 폴더가 이미 있습니다."}), 409
+    try:
+        os.makedirs(target)
+    except OSError as exc:
+        return jsonify({"error": f"폴더 생성에 실패했습니다: {exc}"}), 500
+    return jsonify({"created": name}), 201
+
+
+@app.route("/api/folder", methods=["DELETE"])
+def folder_delete():
+    """빈 폴더만 삭제한다 (안에 파일이 있으면 거부)."""
+    rel = (request.args.get("path") or "").strip().strip("/")
+    if not rel:
+        return jsonify({"error": "최상위 폴더는 삭제할 수 없습니다."}), 400
+    path = safe_dir(rel)
+    if not os.path.isdir(path):
+        return jsonify({"error": "폴더를 찾을 수 없습니다."}), 404
+    if os.listdir(path):
+        return jsonify({"error": "폴더가 비어 있지 않습니다."}), 409
+    try:
+        os.rmdir(path)
+    except OSError as exc:
+        return jsonify({"error": f"삭제에 실패했습니다: {exc}"}), 500
+    return jsonify({"deleted": rel})
 
 
 if __name__ == "__main__":

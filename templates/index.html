@@ -117,6 +117,85 @@
   .chip.primary:hover { background: var(--accent); color: #fff; }
   .chip.primary.done { border-color: var(--ok); color: var(--ok); }
 
+  .chip.danger { border-color: var(--border); color: var(--muted); }
+  .chip.danger:hover { border-color: var(--accent); color: var(--accent); }
+
+  .save-to {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+  }
+  .save-to .label { color: var(--muted); }
+  .save-to select {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+  }
+  .save-to select:focus { border-color: var(--accent); }
+  .date-toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+  .date-toggle input { width: 17px; height: 17px; accent-color: var(--accent); }
+
+  .explorer-actions { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .explorer-actions .chip[hidden] { display: none; }
+  .crumbs .seg.link { cursor: pointer; color: var(--accent); }
+  .crumbs .seg.link:hover { text-decoration: underline; }
+
+  .ex-row.dir .ex-name .txt { font-weight: 600; }
+  .ex-row.dir { cursor: pointer; }
+
+  .modal-back {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 40;
+  }
+  .modal-back[hidden] { display: none; }
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    width: 100%;
+    max-width: 380px;
+  }
+  .modal h3 { font-size: 1.02rem; margin-bottom: 6px; }
+  .modal .sub {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 14px;
+    word-break: break-all;
+  }
+  .modal select, .modal input[type="text"] {
+    width: 100%;
+    padding: 11px 12px;
+    font-size: 0.95rem;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    outline: none;
+    margin-bottom: 14px;
+  }
+  .modal select:focus, .modal input:focus { border-color: var(--accent); }
+  .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+
   .status { text-align: center; color: var(--muted); margin: 24px 0; min-height: 1.4em; }
   .status.error { color: var(--accent); }
 
@@ -484,6 +563,14 @@
       <button type="button" class="chip" id="clearBtn">지우기</button>
     </div>
 
+    <div class="save-to">
+      <span class="label">저장 위치</span>
+      <select id="saveFolder"><option value="">uptube (기본)</option></select>
+      <label class="date-toggle">
+        <input type="checkbox" id="dateFolder"> 날짜 폴더
+      </label>
+    </div>
+
     <div class="status" id="status"></div>
     <div class="results" id="results"></div>
   </div>
@@ -510,6 +597,11 @@
       </select>
       <button id="refreshFiles" class="ghost-btn" title="새로고침">↻</button>
     </div>
+    <div class="explorer-actions">
+      <button class="chip" id="newFolderBtn">＋ 새 폴더</button>
+      <button class="chip" id="upBtn" hidden>↰ 상위 폴더</button>
+      <button class="chip danger" id="delFolderBtn" hidden>현재 폴더 삭제</button>
+    </div>
     <div class="explorer-summary" id="explorerSummary"></div>
 
     <div class="explorer">
@@ -520,6 +612,18 @@
         <span class="col-act">작업</span>
       </div>
       <div id="explorerList"><div class="empty-note">저장된 파일이 없습니다.</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="modalBack" hidden>
+  <div class="modal">
+    <h3 id="modalTitle"></h3>
+    <div class="sub" id="modalSub"></div>
+    <div id="modalBody"></div>
+    <div class="modal-btns">
+      <button class="chip" id="modalCancel">취소</button>
+      <button class="chip primary" id="modalOk">확인</button>
     </div>
   </div>
 </div>
@@ -721,7 +825,11 @@ async function downloadAudio(item, btn) {
     const res = await fetch(`/api/download/${encodeURIComponent(item.id)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: item.title }),
+      body: JSON.stringify({
+        title: item.title,
+        folder: saveFolderEl.value,
+        date_folder: dateFolderEl.checked,
+      }),
     });
     let data = {};
     try { data = await res.json(); } catch (_) {}
@@ -905,29 +1013,60 @@ const spAudio = document.getElementById('spAudio');
 const spTitle = document.getElementById('spTitle');
 
 let allFiles = [];
-let playingName = null;
+let allDirs = [];
+let curPath = '';          // 현재 보고 있는 하위 폴더 (상대 경로)
+let folderOptions = [];    // 저장 위치 선택용 전체 폴더 목록
+let playingPath = null;    // 재생 중인 파일의 상대 경로
 
-function renderCrumbs(folder) {
+function joinPath(a, b) { return a ? `${a}/${b}` : b; }
+
+function renderCrumbs(rootFolder) {
   crumbsEl.innerHTML = '';
   // 안드로이드 Download 폴더는 탐색기에서 보이는 이름으로 바꿔 표시
-  const friendly = folder.replace(
+  const friendly = rootFolder.replace(
     /^(\/data\/data\/com\.termux\/files\/home\/storage\/downloads|\/storage\/emulated\/0\/Download)/,
     '내장 저장공간/Download');
-  friendly.split('/').filter(Boolean).forEach((seg, i, arr) => {
-    if (i > 0) {
-      const sep = document.createElement('span');
-      sep.className = 'sep';
-      sep.textContent = '›';
-      crumbsEl.appendChild(sep);
-    }
+
+  const addSep = () => {
+    const sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = '›';
+    crumbsEl.appendChild(sep);
+  };
+
+  const rootSegs = friendly.split('/').filter(Boolean);
+  rootSegs.forEach((seg, i) => {
+    if (i > 0) addSep();
     const s = document.createElement('span');
     s.className = 'seg';
+    // 마지막 루트 조각(uptube)은 하위 폴더에 있을 때 클릭해 돌아올 수 있게
+    if (i === rootSegs.length - 1 && curPath) {
+      s.classList.add('link');
+      s.addEventListener('click', () => openFolder(''));
+    }
     s.textContent = seg;
     crumbsEl.appendChild(s);
   });
+
+  if (curPath) {
+    const parts = curPath.split('/');
+    parts.forEach((seg, i) => {
+      addSep();
+      const s = document.createElement('span');
+      s.className = 'seg';
+      s.textContent = seg;
+      if (i < parts.length - 1) {
+        s.classList.add('link');
+        const target = parts.slice(0, i + 1).join('/');
+        s.addEventListener('click', () => openFolder(target));
+      }
+      crumbsEl.appendChild(s);
+    });
+  }
+
   const full = document.createElement('span');
   full.className = 'full';
-  full.textContent = folder;
+  full.textContent = curPath ? `${rootFolder}/${curPath}` : rootFolder;
   crumbsEl.appendChild(full);
 }
 
@@ -944,29 +1083,76 @@ function sortedFiles() {
   return list;
 }
 
+function fmtDate(mtime) {
+  return new Date(mtime * 1000).toLocaleString('ko-KR', {
+    year: '2-digit', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
 function renderExplorer() {
+  const q = fileFilterEl.value.trim().toLowerCase();
+  const dirs = allDirs.filter((d) => !q || d.name.toLowerCase().includes(q));
   const list = sortedFiles();
   explorerListEl.innerHTML = '';
-  if (!list.length) {
-    explorerListEl.innerHTML = allFiles.length
+
+  if (!dirs.length && !list.length) {
+    explorerListEl.innerHTML = (allDirs.length || allFiles.length)
       ? '<div class="empty-note">검색 결과가 없습니다.</div>'
-      : '<div class="empty-note">저장된 파일이 없습니다.</div>';
+      : '<div class="empty-note">이 폴더는 비어 있습니다.</div>';
     return;
   }
-  list.forEach((f) => {
+
+  // 폴더 먼저
+  dirs.forEach((d) => {
     const row = document.createElement('div');
-    row.className = 'ex-row' + (f.name === playingName ? ' playing' : '');
+    row.className = 'ex-row dir';
+    row.addEventListener('click', (e) => {
+      if (!e.target.closest('.col-act')) openFolder(joinPath(curPath, d.name));
+    });
 
     const name = document.createElement('div');
     name.className = 'ex-name col-name';
-    const ico = document.createElement('span');
-    ico.className = 'ico';
-    ico.textContent = '🎵';
+    name.innerHTML = '<span class="ico">📁</span>';
+    const txt = document.createElement('span');
+    txt.className = 'txt';
+    txt.textContent = d.name;
+    name.appendChild(txt);
+
+    const size = document.createElement('div');
+    size.className = 'col-size';
+    size.textContent = `${d.count}곡`;
+
+    const date = document.createElement('div');
+    date.className = 'col-date';
+    date.textContent = fmtDate(d.mtime);
+
+    const act = document.createElement('div');
+    act.className = 'col-act';
+    const open = document.createElement('button');
+    open.className = 'icon-btn';
+    open.title = '열기';
+    open.textContent = '›';
+    open.addEventListener('click', () => openFolder(joinPath(curPath, d.name)));
+    act.appendChild(open);
+
+    row.append(name, size, date, act);
+    explorerListEl.appendChild(row);
+  });
+
+  list.forEach((f) => {
+    const rel = joinPath(curPath, f.name);
+    const row = document.createElement('div');
+    row.className = 'ex-row' + (rel === playingPath ? ' playing' : '');
+
+    const name = document.createElement('div');
+    name.className = 'ex-name col-name';
+    name.innerHTML = '<span class="ico">🎵</span>';
     const txt = document.createElement('span');
     txt.className = 'txt';
     txt.textContent = f.name;
     txt.title = f.name;
-    name.append(ico, txt);
+    name.appendChild(txt);
 
     const size = document.createElement('div');
     size.className = 'col-size';
@@ -974,10 +1160,7 @@ function renderExplorer() {
 
     const date = document.createElement('div');
     date.className = 'col-date';
-    date.textContent = new Date(f.mtime * 1000).toLocaleString('ko-KR', {
-      year: '2-digit', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
+    date.textContent = fmtDate(f.mtime);
 
     const act = document.createElement('div');
     act.className = 'col-act';
@@ -985,14 +1168,20 @@ function renderExplorer() {
     const play = document.createElement('button');
     play.className = 'icon-btn';
     play.title = '재생';
-    play.textContent = f.name === playingName ? '⏸' : '▶';
-    play.addEventListener('click', () => playFile(f.name));
+    play.textContent = rel === playingPath && !spAudio.paused ? '⏸' : '▶';
+    play.addEventListener('click', () => playFile(rel, f.name));
+
+    const move = document.createElement('button');
+    move.className = 'icon-btn';
+    move.title = '폴더로 이동';
+    move.textContent = '📂';
+    move.addEventListener('click', () => moveFile(rel, f.name));
 
     const save = document.createElement('a');
     save.className = 'icon-btn';
     save.title = '이 기기로 저장';
     save.textContent = '⬇';
-    save.href = `/api/files/${encodeURIComponent(f.name)}?download=1`;
+    save.href = `/api/file?path=${encodeURIComponent(rel)}&download=1`;
     save.setAttribute('download', f.name);
     save.style.display = 'inline-flex';
     save.style.alignItems = 'center';
@@ -1003,29 +1192,29 @@ function renderExplorer() {
     del.className = 'icon-btn danger';
     del.title = '삭제';
     del.textContent = '🗑';
-    del.addEventListener('click', () => deleteFile(f.name));
+    del.addEventListener('click', () => deleteFile(rel, f.name));
 
-    act.append(play, save, del);
+    act.append(play, move, save, del);
     row.append(name, size, date, act);
     explorerListEl.appendChild(row);
   });
 }
 
-function playFile(name) {
-  if (playingName === name) {
+function playFile(rel, name) {
+  if (playingPath === rel) {
     // 같은 곡을 다시 누르면 재생/일시정지 토글
     if (spAudio.paused) spAudio.play().catch(() => {});
     else spAudio.pause();
     renderExplorer();
     return;
   }
-  playingName = name;
-  spTitle.textContent = name;
-  spAudio.src = `/api/files/${encodeURIComponent(name)}`;
+  playingPath = rel;
+  spTitle.textContent = name || rel.split('/').pop();
+  spAudio.src = `/api/file?path=${encodeURIComponent(rel)}`;
   spAudio.play().catch(() => {});
   stickyPlayer.hidden = false;
   document.body.classList.add('player-open');
-  updateMediaSession(name);
+  updateMediaSession(spTitle.textContent);
   renderExplorer();
 }
 
@@ -1053,9 +1242,9 @@ function updateMediaSession(name) {
 function step(delta) {
   const list = sortedFiles();
   if (!list.length) return;
-  const i = list.findIndex((f) => f.name === playingName);
+  const i = list.findIndex((f) => joinPath(curPath, f.name) === playingPath);
   const next = list[(i + delta + list.length) % list.length];
-  if (next) playFile(next.name);
+  if (next) playFile(joinPath(curPath, next.name), next.name);
 }
 
 // 곡이 끝나면 다음 곡으로 이어 재생
@@ -1068,22 +1257,22 @@ document.getElementById('spClose').addEventListener('click', () => {
   spAudio.removeAttribute('src');
   stickyPlayer.hidden = true;
   document.body.classList.remove('player-open');
-  playingName = null;
+  playingPath = null;
   renderExplorer();
 });
 spAudio.addEventListener('play', renderExplorer);
 spAudio.addEventListener('pause', renderExplorer);
 
-async function deleteFile(name) {
+async function deleteFile(rel, name) {
   if (!confirm(`삭제할까요?\n\n${name}`)) return;
   try {
-    const res = await fetch(`/api/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/file?path=${encodeURIComponent(rel)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('삭제에 실패했습니다.');
-    if (playingName === name) {
+    if (playingPath === rel) {
       spAudio.pause();
       stickyPlayer.hidden = true;
       document.body.classList.remove('player-open');
-      playingName = null;
+      playingPath = null;
     }
     loadFiles();
   } catch (err) {
@@ -1091,18 +1280,168 @@ async function deleteFile(name) {
   }
 }
 
+function openFolder(path) {
+  curPath = path;
+  fileFilterEl.value = '';
+  loadFiles();
+}
+
 async function loadFiles() {
   try {
-    const res = await fetch('/api/files');
-    if (!res.ok) return;
+    const res = await fetch(`/api/files?path=${encodeURIComponent(curPath)}`);
+    if (!res.ok) {  // 폴더가 사라졌으면 최상위로
+      if (curPath) { curPath = ''; return loadFiles(); }
+      return;
+    }
     const data = await res.json();
     allFiles = data.files;
-    renderCrumbs(data.folder);
+    allDirs = data.dirs;
+    folderOptions = data.all_folders;
+    curPath = data.path;
+    renderCrumbs(data.root);
+    const dirNote = data.dirs.length ? `폴더 ${data.dirs.length}개 · ` : '';
     explorerSummaryEl.textContent =
-      `파일 ${data.count}개 · 총 ${formatBytes(data.total_size)}`;
+      `${dirNote}파일 ${data.count}개 · 총 ${formatBytes(data.total_size)}`;
+    upBtn.hidden = !curPath;
+    delFolderBtn.hidden = !curPath;
     renderExplorer();
+    syncSaveFolderOptions();
   } catch (_) { /* 네트워크 오류는 조용히 무시 */ }
 }
+
+// ---- 폴더 만들기 / 이동 / 삭제 ----
+
+const modalBack = document.getElementById('modalBack');
+const modalTitle = document.getElementById('modalTitle');
+const modalSub = document.getElementById('modalSub');
+const modalBody = document.getElementById('modalBody');
+const modalOk = document.getElementById('modalOk');
+const upBtn = document.getElementById('upBtn');
+const delFolderBtn = document.getElementById('delFolderBtn');
+
+function closeModal() {
+  modalBack.hidden = true;
+  modalBody.innerHTML = '';
+  modalOk.onclick = null;
+}
+document.getElementById('modalCancel').addEventListener('click', closeModal);
+modalBack.addEventListener('click', (e) => { if (e.target === modalBack) closeModal(); });
+
+function openModal(title, sub, bodyEl, onOk) {
+  modalTitle.textContent = title;
+  modalSub.textContent = sub;
+  modalBody.innerHTML = '';
+  modalBody.appendChild(bodyEl);
+  modalOk.onclick = onOk;
+  modalBack.hidden = false;
+}
+
+document.getElementById('newFolderBtn').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = `예: ${new Date().toISOString().slice(0, 10)}`;
+  openModal('새 폴더', `위치: uptube${curPath ? '/' + curPath : ''}`, input, async () => {
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      const res = await fetch('/api/folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: curPath, name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '폴더 생성에 실패했습니다.');
+      closeModal();
+      loadFiles();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+  setTimeout(() => input.focus(), 50);
+});
+
+upBtn.addEventListener('click', () => {
+  const parts = curPath.split('/');
+  parts.pop();
+  openFolder(parts.join('/'));
+});
+
+delFolderBtn.addEventListener('click', async () => {
+  if (!curPath) return;
+  if (!confirm(`폴더를 삭제할까요?\n\n${curPath}\n(비어 있을 때만 삭제됩니다)`)) return;
+  try {
+    const res = await fetch(`/api/folder?path=${encodeURIComponent(curPath)}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '삭제에 실패했습니다.');
+    const parts = curPath.split('/');
+    parts.pop();
+    openFolder(parts.join('/'));
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+function moveFile(rel, name) {
+  const sel = document.createElement('select');
+  const opts = ['', ...folderOptions];
+  opts.forEach((p) => {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p ? `uptube/${p}` : 'uptube (최상위)';
+    if (p === curPath) o.selected = true;
+    sel.appendChild(o);
+  });
+  openModal('폴더로 이동', name, sel, async () => {
+    try {
+      const res = await fetch('/api/file/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: rel, to: sel.value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '이동에 실패했습니다.');
+      if (playingPath === rel) {
+        spAudio.pause();
+        stickyPlayer.hidden = true;
+        document.body.classList.remove('player-open');
+        playingPath = null;
+      }
+      closeModal();
+      loadFiles();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+}
+
+// ---- 저장 위치 선택 (검색 탭) ----
+
+const saveFolderEl = document.getElementById('saveFolder');
+const dateFolderEl = document.getElementById('dateFolder');
+
+function syncSaveFolderOptions() {
+  const cur = saveFolderEl.value;
+  saveFolderEl.innerHTML = '';
+  [''].concat(folderOptions).forEach((p) => {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p ? `uptube/${p}` : 'uptube (기본)';
+    saveFolderEl.appendChild(o);
+  });
+  const saved = cur || localStorage.getItem('uptube.saveFolder') || '';
+  saveFolderEl.value = [''].concat(folderOptions).includes(saved) ? saved : '';
+}
+
+try {
+  dateFolderEl.checked = localStorage.getItem('uptube.dateFolder') === '1';
+} catch (_) { /* 저장소 접근 불가 시 기본값 사용 */ }
+
+saveFolderEl.addEventListener('change', () => {
+  try { localStorage.setItem('uptube.saveFolder', saveFolderEl.value); } catch (_) {}
+});
+dateFolderEl.addEventListener('change', () => {
+  try { localStorage.setItem('uptube.dateFolder', dateFolderEl.checked ? '1' : '0'); } catch (_) {}
+});
 
 fileFilterEl.addEventListener('input', renderExplorer);
 sortSelectEl.addEventListener('change', renderExplorer);
@@ -1153,6 +1492,7 @@ function scheduleNextPoll(delay) {
 }
 
 pollJobs();
+loadFiles();  // 저장 위치 목록을 미리 채워 둔다
 </script>
 </body>
 </html>
