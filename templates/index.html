@@ -2,8 +2,13 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>UpTube - 유튜브 음원 다운로드</title>
+<link rel="manifest" href="/static/manifest.json">
+<link rel="icon" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<meta name="theme-color" content="#0f1115">
+<meta name="mobile-web-app-capable" content="yes">
 <style>
   :root {
     --bg: #0f1115;
@@ -491,6 +496,8 @@
 
 <div class="sticky-player" id="stickyPlayer" hidden>
   <div class="sp-title" id="spTitle"></div>
+  <button class="icon-btn" id="spPrev" title="이전 곡">⏮</button>
+  <button class="icon-btn" id="spNext" title="다음 곡">⏭</button>
   <audio id="spAudio" controls autoplay></audio>
   <button class="sp-close" id="spClose" title="닫기">✕</button>
 </div>
@@ -931,8 +938,10 @@ function renderExplorer() {
 }
 
 function playFile(name) {
-  if (playingName === name && !spAudio.paused) {
-    spAudio.pause();
+  if (playingName === name) {
+    // 같은 곡을 다시 누르면 재생/일시정지 토글
+    if (spAudio.paused) spAudio.play().catch(() => {});
+    else spAudio.pause();
     renderExplorer();
     return;
   }
@@ -942,8 +951,43 @@ function playFile(name) {
   spAudio.play().catch(() => {});
   stickyPlayer.hidden = false;
   document.body.classList.add('player-open');
+  updateMediaSession(name);
   renderExplorer();
 }
+
+// 잠금화면·알림창에서 재생을 제어할 수 있게 한다 (안드로이드 크롬)
+function updateMediaSession(name) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: name.replace(/\.mp3$/i, ''),
+    artist: 'UpTube',
+    artwork: [
+      { src: '/static/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/static/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+  });
+  const set = (action, handler) => {
+    try { navigator.mediaSession.setActionHandler(action, handler); } catch (_) {}
+  };
+  set('play', () => spAudio.play().catch(() => {}));
+  set('pause', () => spAudio.pause());
+  set('previoustrack', () => step(-1));
+  set('nexttrack', () => step(1));
+}
+
+// 현재 목록 순서대로 이전/다음 곡
+function step(delta) {
+  const list = sortedFiles();
+  if (!list.length) return;
+  const i = list.findIndex((f) => f.name === playingName);
+  const next = list[(i + delta + list.length) % list.length];
+  if (next) playFile(next.name);
+}
+
+// 곡이 끝나면 다음 곡으로 이어 재생
+spAudio.addEventListener('ended', () => step(1));
+document.getElementById('spPrev').addEventListener('click', () => step(-1));
+document.getElementById('spNext').addEventListener('click', () => step(1));
 
 document.getElementById('spClose').addEventListener('click', () => {
   spAudio.pause();
