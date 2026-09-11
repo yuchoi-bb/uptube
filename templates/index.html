@@ -59,6 +59,8 @@
     border-radius: 10px;
     text-align: center;
   }
+  .badge[hidden] { display: none; }  /* display 지정이 hidden 속성을 덮지 않도록 */
+  body.player-open { padding-bottom: 84px; }  /* 하단 고정 플레이어에 가리지 않게 */
 
   .search-box { display: flex; gap: 10px; margin-bottom: 28px; }
   .search-box input {
@@ -273,6 +275,152 @@
   }
   .empty-note { color: var(--muted); text-align: center; padding: 20px 0; }
 
+  /* ---- 파일 탐색기 ---- */
+  .crumbs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--muted);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+  }
+  .crumbs .seg { color: var(--text); }
+  .crumbs .sep { opacity: 0.5; }
+  .crumbs .full { flex-basis: 100%; font-size: 0.78rem; word-break: break-all; }
+
+  .explorer-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+  .explorer-bar input, .explorer-bar select {
+    padding: 10px 12px;
+    font-size: 0.92rem;
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    outline: none;
+  }
+  .explorer-bar input { flex: 1; min-width: 0; }
+  .explorer-bar input:focus, .explorer-bar select:focus { border-color: var(--accent); }
+  .ghost-btn {
+    padding: 10px 14px;
+    font-size: 1rem;
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  .ghost-btn:hover { border-color: var(--muted); }
+  .explorer-summary { color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
+
+  .explorer {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--card);
+  }
+  .ex-head, .ex-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 150px 132px;
+    gap: 10px;
+    align-items: center;
+    padding: 11px 14px;
+  }
+  .ex-head {
+    background: var(--card-hover);
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.83rem;
+    font-weight: 600;
+  }
+  .ex-head span[data-sort] { cursor: pointer; user-select: none; }
+  .ex-head span[data-sort]:hover { color: var(--text); }
+  .ex-head .col-size, .ex-row .col-size,
+  .ex-head .col-date, .ex-row .col-date { text-align: right; }
+  .ex-row { border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+  .ex-row:last-child { border-bottom: none; }
+  .ex-row:hover { background: var(--card-hover); }
+  .ex-row.playing { background: rgba(52, 199, 123, 0.08); }
+  .ex-name { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .ex-name .ico { flex-shrink: 0; opacity: 0.85; }
+  .ex-name .txt {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ex-row .col-size, .ex-row .col-date { color: var(--muted); font-size: 0.85rem; }
+  .col-act { display: flex; gap: 6px; justify-content: flex-end; }
+  .icon-btn {
+    width: 36px;
+    height: 34px;
+    font-size: 0.95rem;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .icon-btn:hover { border-color: var(--muted); background: var(--bg); }
+  .icon-btn.danger:hover { border-color: var(--accent); color: var(--accent); }
+
+  .sticky-player {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 20px rgba(0,0,0,0.35);
+    z-index: 20;
+  }
+  .sticky-player .sp-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sticky-player audio { height: 38px; max-width: 420px; }
+  .sp-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.05rem;
+    cursor: pointer;
+    padding: 6px 8px;
+  }
+  .sp-close:hover { color: var(--text); }
+
+  @media (max-width: 760px) {
+    /* 좁은 화면: 안드로이드 파일관리자처럼 카드형으로 */
+    .ex-head { display: none; }
+    .ex-row {
+      grid-template-columns: 1fr auto;
+      grid-template-areas: "name name" "meta act";
+      row-gap: 8px;
+      padding: 13px 14px;
+    }
+    .ex-name { grid-area: name; }
+    .ex-row .col-size { grid-area: meta; text-align: left; }
+    .ex-row .col-date {
+      grid-area: meta;
+      text-align: left;
+      margin-left: 78px;
+    }
+    .col-act { grid-area: act; }
+    .sticky-player { flex-wrap: wrap; }
+    .sticky-player audio { width: 100%; max-width: none; order: 3; }
+  }
+
   @media (max-width: 640px) {
     .card { flex-direction: column; align-items: stretch; }
     .thumb-wrap img { width: 100%; height: auto; aspect-ratio: 16 / 9; }
@@ -291,6 +439,7 @@
   <nav class="tabs">
     <button class="tab active" id="tabSearch">검색</button>
     <button class="tab" id="tabDownloads">다운로드<span class="badge" id="dlBadge" hidden>0</span></button>
+    <button class="tab" id="tabFiles">파일</button>
   </nav>
 
   <div id="searchView">
@@ -311,6 +460,39 @@
     <div class="section-title">완료된 파일</div>
     <div id="fileList"><div class="empty-note">저장된 파일이 없습니다.</div></div>
   </div>
+
+  <div id="filesView" hidden>
+    <div class="crumbs" id="crumbs"></div>
+    <div class="explorer-bar">
+      <input id="fileFilter" type="text" autocomplete="off" placeholder="파일 이름 검색">
+      <select id="sortSelect">
+        <option value="mtime-desc">최신순</option>
+        <option value="mtime-asc">오래된순</option>
+        <option value="name-asc">이름 ↑</option>
+        <option value="name-desc">이름 ↓</option>
+        <option value="size-desc">큰 파일순</option>
+        <option value="size-asc">작은 파일순</option>
+      </select>
+      <button id="refreshFiles" class="ghost-btn" title="새로고침">↻</button>
+    </div>
+    <div class="explorer-summary" id="explorerSummary"></div>
+
+    <div class="explorer">
+      <div class="ex-head">
+        <span class="col-name" data-sort="name">이름</span>
+        <span class="col-size" data-sort="size">크기</span>
+        <span class="col-date" data-sort="mtime">수정한 날짜</span>
+        <span class="col-act">작업</span>
+      </div>
+      <div id="explorerList"><div class="empty-note">저장된 파일이 없습니다.</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="sticky-player" id="stickyPlayer" hidden>
+  <div class="sp-title" id="spTitle"></div>
+  <audio id="spAudio" controls autoplay></audio>
+  <button class="sp-close" id="spClose" title="닫기">✕</button>
 </div>
 
 <script>
@@ -487,16 +669,22 @@ const jobListEl = document.getElementById('jobList');
 const fileListEl = document.getElementById('fileList');
 const folderPathEl = document.getElementById('folderPath');
 
+const tabFiles = document.getElementById('tabFiles');
+const filesView = document.getElementById('filesView');
+
 function switchTab(name) {
-  const showSearch = name === 'search';
-  tabSearch.classList.toggle('active', showSearch);
-  tabDownloads.classList.toggle('active', !showSearch);
-  searchView.hidden = !showSearch;
-  downloadsView.hidden = showSearch;
-  if (!showSearch) pollJobs();
+  tabSearch.classList.toggle('active', name === 'search');
+  tabDownloads.classList.toggle('active', name === 'downloads');
+  tabFiles.classList.toggle('active', name === 'files');
+  searchView.hidden = name !== 'search';
+  downloadsView.hidden = name !== 'downloads';
+  filesView.hidden = name !== 'files';
+  if (name === 'downloads') pollJobs();
+  if (name === 'files') loadFiles();
 }
 tabSearch.addEventListener('click', () => switchTab('search'));
 tabDownloads.addEventListener('click', () => switchTab('downloads'));
+tabFiles.addEventListener('click', () => switchTab('files'));
 
 function formatBytes(n) {
   if (n == null) return '?';
@@ -622,7 +810,197 @@ function renderFiles(files) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// 파일 탐색기 탭
+// ---------------------------------------------------------------------------
+
+const crumbsEl = document.getElementById('crumbs');
+const explorerListEl = document.getElementById('explorerList');
+const explorerSummaryEl = document.getElementById('explorerSummary');
+const fileFilterEl = document.getElementById('fileFilter');
+const sortSelectEl = document.getElementById('sortSelect');
+const stickyPlayer = document.getElementById('stickyPlayer');
+const spAudio = document.getElementById('spAudio');
+const spTitle = document.getElementById('spTitle');
+
+let allFiles = [];
+let playingName = null;
+
+function renderCrumbs(folder) {
+  crumbsEl.innerHTML = '';
+  // 안드로이드 Download 폴더는 탐색기에서 보이는 이름으로 바꿔 표시
+  const friendly = folder.replace(
+    /^(\/data\/data\/com\.termux\/files\/home\/storage\/downloads|\/storage\/emulated\/0\/Download)/,
+    '내장 저장공간/Download');
+  friendly.split('/').filter(Boolean).forEach((seg, i, arr) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = '›';
+      crumbsEl.appendChild(sep);
+    }
+    const s = document.createElement('span');
+    s.className = 'seg';
+    s.textContent = seg;
+    crumbsEl.appendChild(s);
+  });
+  const full = document.createElement('span');
+  full.className = 'full';
+  full.textContent = folder;
+  crumbsEl.appendChild(full);
+}
+
+function sortedFiles() {
+  const [key, dir] = sortSelectEl.value.split('-');
+  const q = fileFilterEl.value.trim().toLowerCase();
+  const list = allFiles.filter((f) => !q || f.name.toLowerCase().includes(q));
+  list.sort((a, b) => {
+    let cmp;
+    if (key === 'name') cmp = a.name.localeCompare(b.name, 'ko');
+    else cmp = a[key] - b[key];
+    return dir === 'asc' ? cmp : -cmp;
+  });
+  return list;
+}
+
+function renderExplorer() {
+  const list = sortedFiles();
+  explorerListEl.innerHTML = '';
+  if (!list.length) {
+    explorerListEl.innerHTML = allFiles.length
+      ? '<div class="empty-note">검색 결과가 없습니다.</div>'
+      : '<div class="empty-note">저장된 파일이 없습니다.</div>';
+    return;
+  }
+  list.forEach((f) => {
+    const row = document.createElement('div');
+    row.className = 'ex-row' + (f.name === playingName ? ' playing' : '');
+
+    const name = document.createElement('div');
+    name.className = 'ex-name col-name';
+    const ico = document.createElement('span');
+    ico.className = 'ico';
+    ico.textContent = '🎵';
+    const txt = document.createElement('span');
+    txt.className = 'txt';
+    txt.textContent = f.name;
+    txt.title = f.name;
+    name.append(ico, txt);
+
+    const size = document.createElement('div');
+    size.className = 'col-size';
+    size.textContent = formatBytes(f.size);
+
+    const date = document.createElement('div');
+    date.className = 'col-date';
+    date.textContent = new Date(f.mtime * 1000).toLocaleString('ko-KR', {
+      year: '2-digit', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
+
+    const act = document.createElement('div');
+    act.className = 'col-act';
+
+    const play = document.createElement('button');
+    play.className = 'icon-btn';
+    play.title = '재생';
+    play.textContent = f.name === playingName ? '⏸' : '▶';
+    play.addEventListener('click', () => playFile(f.name));
+
+    const save = document.createElement('a');
+    save.className = 'icon-btn';
+    save.title = '이 기기로 저장';
+    save.textContent = '⬇';
+    save.href = `/api/files/${encodeURIComponent(f.name)}?download=1`;
+    save.setAttribute('download', f.name);
+    save.style.display = 'inline-flex';
+    save.style.alignItems = 'center';
+    save.style.justifyContent = 'center';
+    save.style.textDecoration = 'none';
+
+    const del = document.createElement('button');
+    del.className = 'icon-btn danger';
+    del.title = '삭제';
+    del.textContent = '🗑';
+    del.addEventListener('click', () => deleteFile(f.name));
+
+    act.append(play, save, del);
+    row.append(name, size, date, act);
+    explorerListEl.appendChild(row);
+  });
+}
+
+function playFile(name) {
+  if (playingName === name && !spAudio.paused) {
+    spAudio.pause();
+    renderExplorer();
+    return;
+  }
+  playingName = name;
+  spTitle.textContent = name;
+  spAudio.src = `/api/files/${encodeURIComponent(name)}`;
+  spAudio.play().catch(() => {});
+  stickyPlayer.hidden = false;
+  document.body.classList.add('player-open');
+  renderExplorer();
+}
+
+document.getElementById('spClose').addEventListener('click', () => {
+  spAudio.pause();
+  spAudio.removeAttribute('src');
+  stickyPlayer.hidden = true;
+  document.body.classList.remove('player-open');
+  playingName = null;
+  renderExplorer();
+});
+spAudio.addEventListener('play', renderExplorer);
+spAudio.addEventListener('pause', renderExplorer);
+
+async function deleteFile(name) {
+  if (!confirm(`삭제할까요?\n\n${name}`)) return;
+  try {
+    const res = await fetch(`/api/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('삭제에 실패했습니다.');
+    if (playingName === name) {
+      spAudio.pause();
+      stickyPlayer.hidden = true;
+      document.body.classList.remove('player-open');
+      playingName = null;
+    }
+    loadFiles();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function loadFiles() {
+  try {
+    const res = await fetch('/api/files');
+    if (!res.ok) return;
+    const data = await res.json();
+    allFiles = data.files;
+    renderCrumbs(data.folder);
+    explorerSummaryEl.textContent =
+      `파일 ${data.count}개 · 총 ${formatBytes(data.total_size)}`;
+    renderExplorer();
+  } catch (_) { /* 네트워크 오류는 조용히 무시 */ }
+}
+
+fileFilterEl.addEventListener('input', renderExplorer);
+sortSelectEl.addEventListener('change', renderExplorer);
+document.getElementById('refreshFiles').addEventListener('click', loadFiles);
+document.querySelectorAll('.ex-head span[data-sort]').forEach((el) => {
+  el.addEventListener('click', () => {
+    const key = el.dataset.sort;
+    const [curKey, curDir] = sortSelectEl.value.split('-');
+    const dir = curKey === key && curDir === 'asc' ? 'desc' : 'asc';
+    sortSelectEl.value = `${key}-${dir}`;
+    renderExplorer();
+  });
+});
+
 let pollTimer = null;
+let prevActive = 0;
 
 async function pollJobs() {
   try {
@@ -636,6 +1014,9 @@ async function pollJobs() {
     } else {
       dlBadge.hidden = true;
     }
+    // 다운로드가 막 끝났으면 파일 목록을 새로 불러온다
+    if (prevActive > 0 && data.active === 0 && !filesView.hidden) loadFiles();
+    prevActive = data.active;
     if (!downloadsView.hidden) {
       folderPathEl.textContent = `저장 폴더: ${data.folder}`;
       renderJobs(data.jobs);

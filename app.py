@@ -21,6 +21,7 @@ from flask import (
     jsonify,
     render_template,
     request,
+    send_file,
     stream_with_context,
 )
 import yt_dlp
@@ -446,6 +447,15 @@ def jobs():
             reverse=True,
         )
 
+    files = list_saved_files()
+    active = sum(1 for j in job_list if j["status"] in ACTIVE_STATUSES)
+    return jsonify(
+        {"jobs": job_list, "files": files, "folder": DOWNLOAD_DIR, "active": active}
+    )
+
+
+def list_saved_files() -> list[dict]:
+    """저장 폴더의 mp3 목록 (최신 순)."""
     files = []
     if os.path.isdir(DOWNLOAD_DIR):
         for name in os.listdir(DOWNLOAD_DIR):
@@ -458,11 +468,59 @@ def jobs():
                 continue
             files.append({"name": name, "size": stat.st_size, "mtime": stat.st_mtime})
         files.sort(key=lambda f: f["mtime"], reverse=True)
+    return files
 
-    active = sum(1 for j in job_list if j["status"] in ACTIVE_STATUSES)
+
+def safe_file_path(name: str) -> str:
+    """저장 폴더 안의 mp3만 허용한다 (경로 탈출 차단)."""
+    if not name or os.path.basename(name) != name or name.startswith("."):
+        abort(400)
+    if not name.lower().endswith(".mp3"):
+        abort(400)
+    path = os.path.realpath(os.path.join(DOWNLOAD_DIR, name))
+    if os.path.dirname(path) != os.path.realpath(DOWNLOAD_DIR):
+        abort(400)
+    if not os.path.isfile(path):
+        abort(404)
+    return path
+
+
+@app.route("/api/files")
+def files_list():
+    """파일 탐색기용 목록."""
+    files = list_saved_files()
     return jsonify(
-        {"jobs": job_list, "files": files, "folder": DOWNLOAD_DIR, "active": active}
+        {
+            "folder": DOWNLOAD_DIR,
+            "files": files,
+            "count": len(files),
+            "total_size": sum(f["size"] for f in files),
+        }
     )
+
+
+@app.route("/api/files/<name>")
+def file_get(name: str):
+    """재생용 스트리밍(기본) 또는 보고 있는 기기로 저장(?download=1)."""
+    path = safe_file_path(name)
+    as_attachment = request.args.get("download") == "1"
+    return send_file(
+        path,
+        mimetype="audio/mpeg",
+        as_attachment=as_attachment,
+        download_name=name,
+        conditional=True,  # Range 지원 → 재생 바 탐색 가능
+    )
+
+
+@app.route("/api/files/<name>", methods=["DELETE"])
+def file_delete(name: str):
+    path = safe_file_path(name)
+    try:
+        os.remove(path)
+    except OSError as exc:
+        return jsonify({"error": f"삭제에 실패했습니다: {exc}"}), 500
+    return jsonify({"deleted": name})
 
 
 if __name__ == "__main__":
