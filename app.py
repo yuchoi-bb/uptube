@@ -74,7 +74,16 @@ def unique_path(directory: str, stem: str, ext: str) -> str:
 MAX_CONCURRENT_DOWNLOADS = 3
 MAX_FINISHED_JOBS = 50  # 완료/실패 작업은 이만큼만 메모리에 유지
 
-ACTIVE_STATUSES = ("queued", "downloading", "converting")
+# 403 Forbidden 등으로 실패하면 다른 player client로 재시도한다.
+# 유튜브가 특정 영상(주로 공식 뮤직비디오)에 대해 기본 클라이언트의 스트림을 막는 경우가 있다.
+PLAYER_CLIENT_FALLBACKS = ("default", "android_vr", "ios", "tv_simply", "web_safari")
+RETRYABLE_ERROR_RE = re.compile(
+    r"403|forbidden|unable to download video data|fragment|precondition check failed"
+    r"|sign in to confirm|player response|nsig|throttl",
+    re.IGNORECASE,
+)
+
+ACTIVE_STATUSES = ("queued", "downloading", "converting", "retrying")
 
 _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS)
 _jobs: dict[str, dict] = {}
@@ -91,14 +100,19 @@ def _trim_finished_jobs() -> None:
         _jobs.pop(job["id"], None)
 
 
-def _run_download_job(job_id: str) -> None:
-    with _jobs_lock:
-        job = _jobs.get(job_id)
-    if job is None:
-        return
+def available_player_clients() -> tuple[str, ...]:
+    """설치된 yt-dlp가 지원하는 클라이언트만 남긴다 (구버전 호환)."""
+    try:
+        from yt_dlp.extractor.youtube._base import INNERTUBE_CLIENTS
+    except Exception:  # noqa: BLE001 - 내부 경로가 없으면 기본 클라이언트만 사용
+        return ("default",)
+    return tuple(
+        c for c in PLAYER_CLIENT_FALLBACKS if c == "default" or c in INNERTUBE_CLIENTS
+    )
 
-    video_id = job["video_id"]
-    tmpdir = tempfile.mkdtemp(prefix="uptube_")
+
+def _attempt_download(job: dict, tmpdir: str, client: str) -> dict:
+    """한 클라이언트로 다운로드를 시도하고 info dict를 반환한다."""
 
     def progress_hook(d: dict) -> None:
         status = d.get("status")
@@ -129,45 +143,78 @@ def _run_download_job(job_id: str) -> None:
             }
         ],
     }
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(
-                f"https://www.youtube.com/watch?v={video_id}", download=True
-            )
+    if client != "default":
+        options["extractor_args"] = {"youtube": {"player_client": [client]}}
 
-        title = info.get("title") or job["title"] or video_id
-        audio_path = os.path.join(tmpdir, f"{video_id}.mp3")
-        if not os.path.exists(audio_path):
-            files = os.listdir(tmpdir)
-            if not files:
-                raise RuntimeError("다운로드된 파일을 찾을 수 없습니다.")
-            audio_path = os.path.join(tmpdir, files[0])
+    with yt_dlp.YoutubeDL(options) as ydl:
+        return ydl.extract_info(
+            f"https://www.youtube.com/watch?v={job['video_id']}", download=True
+        )
 
-        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-        dest = unique_path(DOWNLOAD_DIR, sanitize_filename(title), ".mp3")
-        file_size = os.path.getsize(audio_path)
-        shutil.move(audio_path, dest)
+
+def _run_download_job(job_id: str) -> None:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        return
+
+    clients = available_player_clients()
+    last_error = "알 수 없는 오류"
+
+    for attempt, client in enumerate(clients, start=1):
+        tmpdir = tempfile.mkdtemp(prefix="uptube_")
         with _jobs_lock:
             job.update(
-                status="done",
-                title=title,
-                filename=os.path.basename(dest),
-                saved=dest,
-                total_bytes=file_size,
-                downloaded_bytes=file_size,
+                status="queued" if attempt == 1 else "retrying",
+                attempt=attempt,
+                max_attempts=len(clients),
+                client=client,
+                downloaded_bytes=0,
+                total_bytes=None,
                 speed=None,
-                finished_at=time.time(),
             )
-    except Exception as exc:  # noqa: BLE001 - 실패 사유를 작업 상태로 전달
-        with _jobs_lock:
-            job.update(
-                status="error",
-                error=str(exc)[:300],
-                speed=None,
-                finished_at=time.time(),
-            )
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        try:
+            info = _attempt_download(job, tmpdir, client)
+
+            title = info.get("title") or job["title"] or job["video_id"]
+            audio_path = os.path.join(tmpdir, f"{job['video_id']}.mp3")
+            if not os.path.exists(audio_path):
+                files = os.listdir(tmpdir)
+                if not files:
+                    raise RuntimeError("다운로드된 파일을 찾을 수 없습니다.")
+                audio_path = os.path.join(tmpdir, files[0])
+
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            dest = unique_path(DOWNLOAD_DIR, sanitize_filename(title), ".mp3")
+            file_size = os.path.getsize(audio_path)
+            shutil.move(audio_path, dest)
+            with _jobs_lock:
+                job.update(
+                    status="done",
+                    title=title,
+                    filename=os.path.basename(dest),
+                    saved=dest,
+                    total_bytes=file_size,
+                    downloaded_bytes=file_size,
+                    speed=None,
+                    error=None,
+                    finished_at=time.time(),
+                )
+            return
+        except Exception as exc:  # noqa: BLE001 - 다음 클라이언트로 재시도
+            last_error = str(exc)
+            if not RETRYABLE_ERROR_RE.search(last_error):
+                break  # 영상 삭제/비공개 등은 클라이언트를 바꿔도 소용없다
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    with _jobs_lock:
+        job.update(
+            status="error",
+            error=last_error[:300],
+            speed=None,
+            finished_at=time.time(),
+        )
 
 
 def is_youtube_url(query: str) -> bool:
@@ -351,6 +398,9 @@ def download(video_id: str):
             "filename": None,
             "saved": None,
             "error": None,
+            "attempt": 0,
+            "max_attempts": len(available_player_clients()),
+            "client": None,
             "created_at": time.time(),
             "finished_at": None,
         }
@@ -359,6 +409,31 @@ def download(video_id: str):
 
     _executor.submit(_run_download_job, job["id"])
     return jsonify({"job": dict(job)}), 202
+
+
+@app.route("/api/jobs/<job_id>/retry", methods=["POST"])
+def retry_job(job_id: str):
+    """실패한 작업을 같은 큐에 다시 넣는다."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "작업을 찾을 수 없습니다."}), 404
+        if job["status"] in ACTIVE_STATUSES:
+            return jsonify({"job": dict(job), "duplicate": True}), 200
+        job.update(
+            status="queued",
+            error=None,
+            downloaded_bytes=0,
+            total_bytes=None,
+            speed=None,
+            attempt=0,
+            created_at=time.time(),
+            finished_at=None,
+        )
+        payload = dict(job)
+
+    _executor.submit(_run_download_job, job_id)
+    return jsonify({"job": payload}), 202
 
 
 @app.route("/api/jobs")

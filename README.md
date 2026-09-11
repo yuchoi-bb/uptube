@@ -110,3 +110,18 @@ tmux attach -t uptube   # 세션 직접 접속 (빠져나오기: Ctrl+b 후 d)
 - 음원 추출은 [yt-dlp](https://github.com/yt-dlp/yt-dlp) + ffmpeg 사용 (192kbps mp3)
 - 재생목록 링크를 넣으면 앞쪽 30개 항목까지 표시됩니다
 - 저작권이 있는 콘텐츠는 개인 소장 등 허용된 범위 내에서만 사용하세요
+
+### 403 Forbidden 오류가 날 때
+
+유튜브가 일부 영상(주로 공식 뮤직비디오)에 대해 기본 클라이언트의 스트림 접근을
+막으면 `HTTP Error 403: Forbidden` 이 납니다. 서버가 자동으로 다른 player client
+(android_vr → ios → tv_simply → web_safari)로 최대 5회까지 재시도하며, 화면에는
+`재시도 중 (2/5)` 로 표시됩니다.
+
+그래도 실패하면 yt-dlp가 오래된 경우가 많습니다:
+
+```bash
+./run.sh update   # yt-dlp 최신화 후 서버 재시작
+```
+
+실패한 작업은 다운로드 탭의 **재시도** 버튼으로 다시 걸 수 있습니다.

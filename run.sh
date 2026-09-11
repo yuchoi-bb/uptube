@@ -89,11 +89,19 @@ logs() {
   tail -n 50 -f "$DIR/uptube.log"
 }
 
+update() {
+  echo "yt-dlp를 최신 버전으로 업데이트합니다..."
+  pip install -U yt-dlp
+  echo "서버를 재시작합니다."
+  stop; start
+}
+
 case "${1:-start}" in
   start)   start ;;
   stop)    stop ;;
   restart) stop; start ;;
   status)  status ;;
   logs)    logs ;;
-  *) echo "사용법: $0 [start|stop|restart|status|logs]"; exit 1 ;;
+  update)  update ;;
+  *) echo "사용법: $0 [start|stop|restart|status|logs|update]"; exit 1 ;;
 esac

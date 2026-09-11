@@ -200,8 +200,23 @@
   .job-state { font-weight: 600; }
   .job-state.downloading { color: #5aa9ff; }
   .job-state.converting { color: #f0b342; }
+  .job-state.retrying { color: #f0b342; }
   .job-state.done { color: var(--ok); }
   .job-state.error { color: var(--accent); }
+  .retry-btn {
+    margin-top: 10px;
+    padding: 8px 18px;
+    font-size: 0.87rem;
+    font-weight: 600;
+    background: transparent;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .retry-btn:hover:not(:disabled) { background: var(--accent); color: #fff; }
+  .retry-btn:disabled { opacity: 0.6; cursor: wait; }
   .progress {
     height: 8px;
     background: var(--border);
@@ -495,9 +510,23 @@ const JOB_STATE_LABEL = {
   queued: '대기 중',
   downloading: '다운로드 중',
   converting: 'MP3 변환 중',
+  retrying: '재시도 중',
   done: '완료',
   error: '실패',
 };
+
+async function retryJob(jobId, btn) {
+  btn.disabled = true;
+  btn.textContent = '재시도 중...';
+  try {
+    const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+    if (!res.ok) throw new Error('재시도 요청에 실패했습니다.');
+    pollJobs();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = '재시도';
+  }
+}
 
 function renderJobs(jobs) {
   jobListEl.innerHTML = '';
@@ -514,7 +543,7 @@ function renderJobs(jobs) {
     title.textContent = job.filename || job.title;
     card.appendChild(title);
 
-    if (job.status === 'downloading' || job.status === 'converting' || job.status === 'queued') {
+    if (['downloading', 'converting', 'queued', 'retrying'].includes(job.status)) {
       const bar = document.createElement('div');
       bar.className = 'progress';
       const fill = document.createElement('div');
@@ -533,7 +562,11 @@ function renderJobs(jobs) {
     meta.className = 'job-meta';
     const state = document.createElement('span');
     state.className = `job-state ${job.status}`;
-    state.textContent = JOB_STATE_LABEL[job.status] || job.status;
+    let label = JOB_STATE_LABEL[job.status] || job.status;
+    if (job.status === 'retrying' && job.attempt) {
+      label += ` (${job.attempt}/${job.max_attempts})`;
+    }
+    state.textContent = label;
     meta.appendChild(state);
 
     const detail = document.createElement('span');
@@ -549,11 +582,18 @@ function renderJobs(jobs) {
     meta.appendChild(detail);
     card.appendChild(meta);
 
-    if (job.status === 'error' && job.error) {
-      const err = document.createElement('div');
-      err.className = 'job-error';
-      err.textContent = job.error;
-      card.appendChild(err);
+    if (job.status === 'error') {
+      if (job.error) {
+        const err = document.createElement('div');
+        err.className = 'job-error';
+        err.textContent = job.error;
+        card.appendChild(err);
+      }
+      const retry = document.createElement('button');
+      retry.className = 'retry-btn';
+      retry.textContent = '재시도';
+      retry.addEventListener('click', () => retryJob(job.id, retry));
+      card.appendChild(retry);
     }
     jobListEl.appendChild(card);
   });
